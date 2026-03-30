@@ -1,0 +1,5 @@
+# 将应用图标文件放置于本目录
+# Windows: icon.ico (256x256)
+# macOS:   icon.icns
+# Linux:   icon.png (512x512)
+# 安装包头图: installerHeader.bmp (150x57)

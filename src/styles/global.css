@@ -1,0 +1,197 @@
+/**
+ * 全局基础样式
+ * 适配高 DPI 屏幕、统一重置、企业风格基础变量
+ */
+
+/* ── CSS 自定义变量（设计 Token）─────────────────────────────── */
+:root {
+  /* 主色系 */
+  --color-primary:       #3b82f6;
+  --color-primary-dark:  #1d4ed8;
+  --color-primary-light: #93c5fd;
+
+  /* 中性色 */
+  --color-text-primary:   #1e293b;
+  --color-text-regular:   #374151;
+  --color-text-secondary: #64748b;
+  --color-text-placeholder: #94a3b8;
+
+  /* 背景色 */
+  --color-bg-page:    #f1f5f9;
+  --color-bg-card:    #ffffff;
+  --color-bg-sidebar: #1e293b;
+
+  /* 边框 */
+  --color-border: #e2e8f0;
+
+  /* 圆角 */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* 间距 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+/* ── 全局重置 ─────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  /* 高 DPI 适配：禁用浏览器字体缩放 */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* 平滑字体渲染 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 14px;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text-regular);
+  background-color: var(--color-bg-page);
+  /* 禁用文字选中拖拽（桌面应用体验）*/
+  -webkit-user-select: none;
+  user-select: none;
+  /* 禁用右键菜单（可选，生产环境建议开启）*/
+  /* -webkit-context-menu: none; */
+  overflow: hidden;
+}
+
+/* 输入框、文本域允许选中 */
+input,
+textarea,
+[contenteditable] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ── Element Plus 全局覆盖 ────────────────────────────────────── */
+
+/* Card 组件 */
+.el-card {
+  border-color: var(--color-border) !important;
+  border-radius: var(--radius-md) !important;
+}
+
+/* Table 组件 */
+.el-table {
+  font-size: 13px;
+  color: var(--color-text-regular);
+}
+
+.el-table th.el-table__cell {
+  background-color: #f8fafc !important;
+  color: var(--color-text-primary);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.el-table .el-table__row:hover > td {
+  background-color: #eff6ff !important;
+}
+
+/* 分页组件 */
+.el-pagination {
+  font-size: 13px;
+}
+
+/* 弹窗组件 */
+.el-dialog {
+  border-radius: var(--radius-lg) !important;
+}
+
+.el-dialog__header {
+  border-bottom: 1px solid var(--color-border);
+  padding: 16px 20px !important;
+}
+
+.el-dialog__body {
+  padding: 20px !important;
+}
+
+.el-dialog__footer {
+  border-top: 1px solid var(--color-border);
+  padding: 14px 20px !important;
+}
+
+/* 表单标签 */
+.el-form-item__label {
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+/* 按钮 */
+.el-button {
+  border-radius: var(--radius-sm) !important;
+  font-weight: 500;
+}
+
+/* Tag 组件 */
+.el-tag {
+  border-radius: var(--radius-sm) !important;
+}
+
+/* 消息提示 */
+.el-message {
+  border-radius: var(--radius-md) !important;
+}
+
+/* 输入框 */
+.el-input__inner,
+.el-textarea__inner {
+  font-size: 13px;
+}
+
+/* Select 下拉 */
+.el-select-dropdown__item {
+  font-size: 13px;
+}
+
+/* ── 工具类 ───────────────────────────────────────────────────── */
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>
