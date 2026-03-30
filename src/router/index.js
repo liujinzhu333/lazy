@@ -26,6 +26,18 @@ const routes = [
         name: 'Note',
         component: () => import('@/views/note/NoteList.vue'),
         meta: { title: '我的笔记', icon: 'Notebook' }
+      },
+      {
+        path: 'account',
+        name: 'Account',
+        component: () => import('@/views/account/AccountList.vue'),
+        meta: { title: '账号管理', icon: 'Key' }
+      },
+      {
+        path: 'setting',
+        name: 'Setting',
+        component: () => import('@/views/setting/SettingView.vue'),
+        meta: { title: '设置', icon: 'Setting' }
       }
     ]
   },

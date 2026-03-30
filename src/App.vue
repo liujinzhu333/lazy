@@ -6,11 +6,15 @@
 </template>
 
 <script setup>
-// App.vue 仅作为路由出口容器，无业务逻辑
+import { useTheme } from '@/composables/useTheme'
+
+// 应用启动时读取本地存储的主题偏好并立即应用
+// 保证刷新或重启后主题不会闪烁为默认值
+const { initTheme } = useTheme()
+initTheme()
 </script>
 
 <style>
-/* 根容器全屏撑满 */
 #root-app {
   width: 100%;
   height: 100vh;

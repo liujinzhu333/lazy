@@ -14,6 +14,12 @@ const ALLOWED_CHANNELS = [
   // 笔记
   'note:list', 'note:detail', 'note:create', 'note:update',
   'note:delete', 'note:batchDelete', 'note:categories',
+  // 账号
+  'account:list', 'account:detail', 'account:create', 'account:update',
+  'account:toggleStar', 'account:delete', 'account:batchDelete', 'account:categories',
+  // 主密码认证
+  'auth:hasMasterPassword', 'auth:isUnlocked', 'auth:setMasterPassword',
+  'auth:unlock', 'auth:lock',
   // 应用
   'app:getVersion', 'app:getDbPath'
 ]
@@ -79,6 +85,52 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   /** 获取分类列表 */
   getNoteCategories: ()      => invoke('note:categories'),
+
+  // ── 账号管理接口 ──────────────────────────────────────────────
+
+  /** 分页查询账号列表（密码不在列表中返回）*/
+  getAccountList:      (params) => invoke('account:list', params),
+
+  /** 获取单条详情（含密码）@param {number} id */
+  getAccountDetail:    (id)     => invoke('account:detail', id),
+
+  /** 新增 @param {{ platform, url, username, password, category, notes, is_starred }} */
+  createAccount:       (data)   => invoke('account:create', data),
+
+  /** 编辑 @param {{ id, platform, ... }} */
+  updateAccount:       (data)   => invoke('account:update', data),
+
+  /** 切换标星 @param {number} id */
+  toggleAccountStar:   (id)     => invoke('account:toggleStar', id),
+
+  /** 删除单条 @param {number} id */
+  deleteAccount:       (id)     => invoke('account:delete', id),
+
+  /** 批量删除 @param {number[]} ids */
+  batchDeleteAccounts: (ids)    => invoke('account:batchDelete', ids),
+
+  /** 获取分类列表 */
+  getAccountCategories: ()      => invoke('account:categories'),
+
+  // ── 主密码认证接口 ────────────────────────────────────────────
+
+  /** 检查是否已设置主密码 */
+  hasMasterPassword:   ()           => invoke('auth:hasMasterPassword'),
+
+  /** 检查是否已解锁 */
+  isUnlocked:          ()           => invoke('auth:isUnlocked'),
+
+  /**
+   * 设置/修改主密码
+   * @param {{ password: string, oldPassword?: string }}
+   */
+  setMasterPassword:   (data)       => invoke('auth:setMasterPassword', data),
+
+  /** 解锁金库 @param {string} password */
+  unlockVault:         (password)   => invoke('auth:unlock', password),
+
+  /** 锁定金库 */
+  lockVault:           ()           => invoke('auth:lock'),
 
   // ── 应用信息 ──────────────────────────────────────────────────
 

@@ -89,7 +89,7 @@
         <!-- 状态切换按钮 -->
         <el-table-column label="状态" width="90" align="center">
           <template #default="{ row }">
-            <el-tooltip :content="statusToggleTip(row.status)" placement="top">
+            <el-tooltip :content="statusToggleTip(row.status)" placement="top" effect="dark">
               <el-tag
                 :type="statusType(row.status)"
                 class="status-tag"

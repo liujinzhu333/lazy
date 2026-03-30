@@ -12,14 +12,14 @@
         <span v-if="!isCollapsed" class="logo-text">个人助手</span>
       </div>
 
-      <!-- 导航菜单 -->
+      <!-- 主导航菜单 -->
       <el-menu
         :default-active="activeRoute"
         :collapse="isCollapsed"
         :collapse-transition="false"
         router
         class="sidebar-menu"
-        background-color="#1e293b"
+        background-color="transparent"
         text-color="#94a3b8"
         active-text-color="#60a5fa"
       >
@@ -33,11 +33,31 @@
         </el-menu-item>
       </el-menu>
 
-      <!-- 底部折叠按钮 -->
-      <div class="collapse-btn" @click="toggleCollapse">
-        <el-icon>
-          <component :is="isCollapsed ? 'Expand' : 'Fold'" />
-        </el-icon>
+      <!-- 底部区域：设置 + 折叠 -->
+      <div class="sidebar-bottom">
+        <!-- 设置入口 -->
+        <el-menu
+          :default-active="activeRoute"
+          :collapse="isCollapsed"
+          :collapse-transition="false"
+          router
+          class="bottom-menu"
+          background-color="transparent"
+          text-color="#94a3b8"
+          active-text-color="#60a5fa"
+        >
+          <el-menu-item index="/setting">
+            <el-icon><Setting /></el-icon>
+            <template #title>设置</template>
+          </el-menu-item>
+        </el-menu>
+
+        <!-- 折叠按钮 -->
+        <div class="collapse-btn" @click="toggleCollapse">
+          <el-icon>
+            <component :is="isCollapsed ? 'Expand' : 'Fold'" />
+          </el-icon>
+        </div>
       </div>
     </el-aside>
 
@@ -82,10 +102,11 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { fetchTodoStats } from '@/api/todo'
 
-// ─── 菜单配置 ────────────────────────────────────────────────────
+// ─── 主导航菜单（不含设置，设置固定在底部）────────────────────────
 const menuItems = [
-  { path: '/todo', title: '待办任务', icon: 'Checked'  },
-  { path: '/note', title: '我的笔记', icon: 'Notebook'  }
+  { path: '/todo',    title: '待办任务', icon: 'Checked'   },
+  { path: '/note',    title: '我的笔记', icon: 'Notebook'  },
+  { path: '/account', title: '账号管理', icon: 'Key'       }
 ]
 
 // ─── 折叠状态 ─────────────────────────────────────────────────────
@@ -95,8 +116,13 @@ const toggleCollapse = () => { isCollapsed.value = !isCollapsed.value }
 // ─── 当前路由 ─────────────────────────────────────────────────────
 const route = useRoute()
 const activeRoute = computed(() => route.path)
+const allMenuItems = [
+  ...menuItems,
+  { path: '/setting', title: '设置' }
+]
+// 账号管理已包含在 menuItems 中，setting 单独固定底部
 const currentTitle = computed(() => {
-  const found = menuItems.find((m) => m.path === route.path)
+  const found = allMenuItems.find((m) => m.path === route.path)
   return found?.title || '个人助手'
 })
 
@@ -133,12 +159,12 @@ defineExpose({ loadStats })
   overflow: hidden;
 }
 
-/* ── 侧边栏 ───────────────────────────────────────────────── */
+/* ── 侧边栏：颜色固定为深色，与主题无关（独立深色面板风格）── */
 .sidebar {
-  background-color: #1e293b;
+  background-color: var(--color-bg-sidebar);
   display: flex;
   flex-direction: column;
-  transition: width 0.25s ease;
+  transition: width 0.25s ease, background-color 0.2s ease;
   overflow: hidden;
   user-select: none;
   flex-shrink: 0;
@@ -149,7 +175,7 @@ defineExpose({ loadStats })
   align-items: center;
   gap: 10px;
   padding: 20px 20px 16px;
-  border-bottom: 1px solid #334155;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   white-space: nowrap;
   overflow: hidden;
 }
@@ -201,28 +227,39 @@ defineExpose({ loadStats })
   background-color: rgba(255, 255, 255, 0.06) !important;
 }
 
+/* ── 底部区域（设置 + 折叠按钮）──────────────────────────── */
+.sidebar-bottom {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.bottom-menu {
+  border-right: none !important;
+  padding: 4px 0;
+}
+
 .collapse-btn {
-  padding: 14px;
+  padding: 12px;
   text-align: center;
   color: #475569;
   cursor: pointer;
-  border-top: 1px solid #334155;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   transition: color 0.2s;
-  flex-shrink: 0;
 }
 
 .collapse-btn:hover { color: #94a3b8; }
 
-/* ── 右侧主区域 ───────────────────────────────────────────── */
+/* ── 右侧主区域：跟随主题切换 ────────────────────────────── */
 .main-container {
-  background-color: #f8fafc;
+  background-color: var(--color-bg-page);
   overflow: hidden;
   flex: 1;
+  transition: background-color 0.2s ease;
 }
 
 .top-header {
-  background-color: #ffffff;
-  border-bottom: 1px solid #e2e8f0;
+  background-color: var(--color-bg-header);
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -230,12 +267,13 @@ defineExpose({ loadStats })
   height: 54px !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   flex-shrink: 0;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .current-title {
   font-size: 16px;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--color-text-primary);
 }
 
 .header-right {
@@ -251,14 +289,15 @@ defineExpose({ loadStats })
 
 .app-version {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--color-text-placeholder);
 }
 
-/* ── 主内容区 ─────────────────────────────────────────────── */
+/* ── 主内容区：跟随主题切换 ──────────────────────────────── */
 .main-content {
   padding: 20px;
   overflow-y: auto;
   height: calc(100vh - 54px);
+  transition: background-color 0.2s ease;
 }
 
 /* ── 路由切换动画 ─────────────────────────────────────────── */

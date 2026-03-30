@@ -1,6 +1,6 @@
 /**
  * Electron 主进程 — 个人助手
- * 职责：窗口管理、IPC 事件处理（todo / note）、数据库调度
+ * 职责：窗口管理、IPC 事件处理（todo / note / account / auth）、数据库调度
  * 安全规范：nodeIntegration:false / contextIsolation:true / preload 白名单通信
  */
 
@@ -17,6 +17,13 @@ const isDev = !app.isPackaged
 
 // ─── 引入数据库模块 ────────────────────────────────────────────────
 const db = require('./database')
+
+// ─── 引入加密模块 ─────────────────────────────────────────────────
+const crypto = require('./crypto')
+
+// ─── 主密码状态（仅主进程内存，进程退出自动清除）────────────────
+// encryptionKey: Buffer | null  — 派生的 AES-256 密钥，解锁后持有
+let encryptionKey = null
 
 // ─── 创建主窗口 ───────────────────────────────────────────────────
 function createWindow() {
@@ -74,6 +81,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
+    // 清除内存中的加密密钥
+    encryptionKey = null
     db.closeDatabase()
     app.quit()
   }
@@ -242,6 +251,200 @@ ipcMain.handle('note:categories', async () => {
   } catch (err) {
     return { success: false, message: err.message }
   }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// IPC 事件：应用信息
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
+// IPC 事件：主密码认证（auth）
+// ═══════════════════════════════════════════════════════════════
+
+/** 检查是否已设置主密码 */
+ipcMain.handle('auth:hasMasterPassword', () => {
+  try {
+    const hash = db.getSetting('master_password_hash')
+    return { success: true, data: { hasPassword: !!hash } }
+  } catch (err) {
+    log.error('auth:hasMasterPassword', err)
+    return { success: false, message: err.message }
+  }
+})
+
+/** 检查当前是否已解锁 */
+ipcMain.handle('auth:isUnlocked', () => {
+  return { success: true, data: { unlocked: encryptionKey !== null } }
+})
+
+/**
+ * 设置（首次）或修改主密码
+ * 修改主密码时需要重新加密所有已有账号密码
+ * @param {{ password: string, oldPassword?: string }} data
+ */
+ipcMain.handle('auth:setMasterPassword', async (e, { password, oldPassword }) => {
+  try {
+    if (!password || password.length < 6) throw new Error('主密码不能少于 6 位')
+
+    const existingHash = db.getSetting('master_password_hash')
+    const existingSalt = db.getSetting('master_password_salt')
+
+    // 若已有主密码，需验证旧密码
+    if (existingHash && existingSalt) {
+      if (!oldPassword) throw new Error('请输入当前主密码')
+      const valid = crypto.verifyMasterPassword(oldPassword, existingSalt, existingHash)
+      if (!valid) throw new Error('当前主密码错误')
+
+      // 旧密钥（用于重新加密）
+      const oldKey = crypto.deriveEncryptionKey(oldPassword, existingSalt)
+
+      // 生成新盐和新密钥
+      const newSalt = crypto.generateSalt()
+      const newHash = crypto.deriveMasterHash(password, newSalt)
+      const newKey  = crypto.deriveEncryptionKey(password, newSalt)
+
+      // 重新加密所有已有账号密码
+      const allAccounts = db.getAccountList({ page: 1, pageSize: 99999 })
+      for (const acc of allAccounts.list) {
+        const row = db.getAccountById(acc.id)
+        if (row.password) {
+          let plainPwd
+          try {
+            plainPwd = crypto.isEncrypted(row.password)
+              ? crypto.decrypt(row.password, oldKey)
+              : row.password  // 兼容旧明文数据
+          } catch {
+            plainPwd = row.password  // 解密失败则保留原值
+          }
+          const newCipher = crypto.encrypt(plainPwd, newKey)
+          db.updateAccount({ ...row, password: newCipher })
+        }
+      }
+
+      // 更新数据库中的哈希和盐
+      db.setSetting('master_password_hash', newHash)
+      db.setSetting('master_password_salt', newSalt)
+      // 更新内存密钥
+      encryptionKey = newKey
+    } else {
+      // 首次设置
+      const salt = crypto.generateSalt()
+      const hash = crypto.deriveMasterHash(password, salt)
+      const key  = crypto.deriveEncryptionKey(password, salt)
+
+      db.setSetting('master_password_hash', hash)
+      db.setSetting('master_password_salt', salt)
+      encryptionKey = key
+    }
+
+    return { success: true }
+  } catch (err) {
+    log.error('auth:setMasterPassword', err)
+    return { success: false, message: err.message }
+  }
+})
+
+/**
+ * 解锁（用主密码派生密钥，存入内存）
+ * @param {string} password
+ */
+ipcMain.handle('auth:unlock', async (e, password) => {
+  try {
+    const hash = db.getSetting('master_password_hash')
+    const salt = db.getSetting('master_password_salt')
+    if (!hash || !salt) throw new Error('尚未设置主密码')
+    const valid = crypto.verifyMasterPassword(password, salt, hash)
+    if (!valid) throw new Error('主密码错误')
+    encryptionKey = crypto.deriveEncryptionKey(password, salt)
+    log.info('账号金库已解锁')
+    return { success: true }
+  } catch (err) {
+    log.error('auth:unlock', err)
+    return { success: false, message: err.message }
+  }
+})
+
+/** 锁定（清除内存密钥） */
+ipcMain.handle('auth:lock', () => {
+  encryptionKey = null
+  log.info('账号金库已锁定')
+  return { success: true }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// IPC 事件：账号管理（account）
+// ═══════════════════════════════════════════════════════════════
+
+/** 分页查询账号列表（密码字段不返回，需要时单独获取）*/
+ipcMain.handle('account:list', async (e, params) => {
+  try { return { success: true, data: db.getAccountList(params) } }
+  catch (err) { log.error('account:list', err); return { success: false, message: err.message } }
+})
+
+/** 获取单条账号详情（含密码，自动解密后返回明文）*/
+ipcMain.handle('account:detail', async (e, id) => {
+  try {
+    if (!encryptionKey) return { success: false, message: '账号金库已锁定，请先解锁', locked: true }
+    const row = db.getAccountById(id)
+    // 解密密码后返回
+    const plainPassword = crypto.isEncrypted(row.password)
+      ? crypto.decrypt(row.password, encryptionKey)
+      : row.password  // 兼容旧明文数据
+    return { success: true, data: { ...row, password: plainPassword } }
+  } catch (err) {
+    log.error('account:detail', err)
+    return { success: false, message: err.message }
+  }
+})
+
+/** 新增账号（密码自动加密后存储）*/
+ipcMain.handle('account:create', async (e, data) => {
+  try {
+    if (!encryptionKey) return { success: false, message: '账号金库已锁定，请先解锁', locked: true }
+    const encryptedData = { ...data, password: crypto.encrypt(data.password || '', encryptionKey) }
+    const id = db.createAccount(encryptedData)
+    return { success: true, data: { id } }
+  } catch (err) {
+    log.error('account:create', err)
+    return { success: false, message: err.message }
+  }
+})
+
+/** 编辑账号（密码自动加密后存储）*/
+ipcMain.handle('account:update', async (e, data) => {
+  try {
+    if (!encryptionKey) return { success: false, message: '账号金库已锁定，请先解锁', locked: true }
+    const encryptedData = { ...data, password: crypto.encrypt(data.password || '', encryptionKey) }
+    db.updateAccount(encryptedData)
+    return { success: true }
+  } catch (err) {
+    log.error('account:update', err)
+    return { success: false, message: err.message }
+  }
+})
+
+/** 切换标星 */
+ipcMain.handle('account:toggleStar', async (e, id) => {
+  try { const next = db.toggleAccountStar(id); return { success: true, data: { is_starred: next } } }
+  catch (err) { log.error('account:toggleStar', err); return { success: false, message: err.message } }
+})
+
+/** 删除单条 */
+ipcMain.handle('account:delete', async (e, id) => {
+  try { db.deleteAccount(id); return { success: true } }
+  catch (err) { log.error('account:delete', err); return { success: false, message: err.message } }
+})
+
+/** 批量删除 */
+ipcMain.handle('account:batchDelete', async (e, ids) => {
+  try { db.batchDeleteAccounts(ids); return { success: true } }
+  catch (err) { log.error('account:batchDelete', err); return { success: false, message: err.message } }
+})
+
+/** 获取分类列表 */
+ipcMain.handle('account:categories', async () => {
+  try { return { success: true, data: db.getAccountCategories() } }
+  catch (err) { return { success: false, message: err.message } }
 })
 
 // ═══════════════════════════════════════════════════════════════

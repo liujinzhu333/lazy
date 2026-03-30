@@ -1,47 +1,87 @@
 /**
  * 全局基础样式
- * 适配高 DPI 屏幕、统一重置、企业风格基础变量
+ * 适配高 DPI 屏幕、统一重置、浅色 / 深色主题双变量
+ * 暗色模式：html.dark（Element Plus 官方约定）
  */
 
-/* ── CSS 自定义变量（设计 Token）─────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════
+   浅色主题变量（默认）
+══════════════════════════════════════════════════════════════ */
 :root {
-  /* 主色系 */
+  /* 主色 */
   --color-primary:       #3b82f6;
   --color-primary-dark:  #1d4ed8;
-  --color-primary-light: #93c5fd;
+  --color-primary-light: #eff6ff;
 
-  /* 中性色 */
-  --color-text-primary:   #1e293b;
-  --color-text-regular:   #374151;
-  --color-text-secondary: #64748b;
+  /* 文字 */
+  --color-text-primary:     #1e293b;
+  --color-text-regular:     #374151;
+  --color-text-secondary:   #64748b;
   --color-text-placeholder: #94a3b8;
 
-  /* 背景色 */
+  /* 背景 */
   --color-bg-page:    #f1f5f9;
   --color-bg-card:    #ffffff;
   --color-bg-sidebar: #1e293b;
+  --color-bg-header:  #ffffff;
+  --color-bg-hover:   #f8fafc;
 
   /* 边框 */
-  --color-border: #e2e8f0;
+  --color-border:       #e2e8f0;
+  --color-border-light: #f1f5f9;
+
+  /* 表格 */
+  --color-table-header: #f8fafc;
+  --color-table-row-hover: #eff6ff;
+  --color-table-stripe: #fafafa;
 
   /* 圆角 */
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
 
-  /* 间距 */
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 16px;
-  --spacing-lg: 24px;
-  --spacing-xl: 32px;
-
   /* 阴影 */
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.04);
+
+  /* 过渡 */
+  --transition-base: 0.2s ease;
 }
 
-/* ── 全局重置 ─────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════
+   深色主题变量（html.dark）
+   Element Plus 暗色模式通过 html.dark 触发，此处同步覆盖自定义变量
+══════════════════════════════════════════════════════════════ */
+html.dark {
+  /* 文字 */
+  --color-text-primary:     #e2e8f0;
+  --color-text-regular:     #cbd5e1;
+  --color-text-secondary:   #94a3b8;
+  --color-text-placeholder: #64748b;
+
+  /* 背景 */
+  --color-bg-page:    #0f172a;
+  --color-bg-card:    #1e293b;
+  --color-bg-sidebar: #0f172a;
+  --color-bg-header:  #1e293b;
+  --color-bg-hover:   #273449;
+
+  /* 边框 */
+  --color-border:       #334155;
+  --color-border-light: #1e293b;
+
+  /* 表格 */
+  --color-table-header:    #273449;
+  --color-table-row-hover: #1d3461;
+  --color-table-stripe:    #192234;
+
+  /* 主色（深色下略亮） */
+  --color-primary-light: #1d3461;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   全局重置
+══════════════════════════════════════════════════════════════ */
 *,
 *::before,
 *::after {
@@ -51,13 +91,12 @@
 }
 
 html {
-  /* 高 DPI 适配：禁用浏览器字体缩放 */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  /* 平滑字体渲染 */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-size: 14px;
+  /* 主题切换过渡 */
+  transition: background-color var(--transition-base), color var(--transition-base);
 }
 
 body {
@@ -68,15 +107,12 @@ body {
   line-height: 1.5;
   color: var(--color-text-regular);
   background-color: var(--color-bg-page);
-  /* 禁用文字选中拖拽（桌面应用体验）*/
   -webkit-user-select: none;
   user-select: none;
-  /* 禁用右键菜单（可选，生产环境建议开启）*/
-  /* -webkit-context-menu: none; */
   overflow: hidden;
+  transition: background-color var(--transition-base), color var(--transition-base);
 }
 
-/* 输入框、文本域允许选中 */
 input,
 textarea,
 [contenteditable] {
@@ -84,75 +120,115 @@ textarea,
   user-select: text;
 }
 
-/* 滚动条美化 */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
+/* ── 滚动条 ───────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-/* ── Element Plus 全局覆盖 ────────────────────────────────────── */
+html.dark ::-webkit-scrollbar-thumb { background: #475569; }
+html.dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
 
-/* Card 组件 */
+/* ══════════════════════════════════════════════════════════════
+   Element Plus 全局覆盖（浅色 + 深色同时适配）
+══════════════════════════════════════════════════════════════ */
+
+/* Card */
 .el-card {
   border-color: var(--color-border) !important;
   border-radius: var(--radius-md) !important;
+  background-color: var(--color-bg-card) !important;
+  transition: background-color var(--transition-base), border-color var(--transition-base);
 }
 
-/* Table 组件 */
+/* Table */
 .el-table {
   font-size: 13px;
   color: var(--color-text-regular);
+  background-color: var(--color-bg-card) !important;
+  --el-table-border-color: var(--color-border);
+  --el-table-header-bg-color: var(--color-table-header);
+  --el-table-tr-bg-color: var(--color-bg-card);
+  --el-table-row-hover-bg-color: var(--color-table-row-hover);
 }
 
 .el-table th.el-table__cell {
-  background-color: #f8fafc !important;
-  color: var(--color-text-primary);
+  background-color: var(--color-table-header) !important;
+  color: var(--color-text-primary) !important;
   font-weight: 600;
   font-size: 13px;
+  border-bottom-color: var(--color-border) !important;
 }
 
-.el-table .el-table__row:hover > td {
-  background-color: #eff6ff !important;
+.el-table td.el-table__cell {
+  border-bottom-color: var(--color-border) !important;
 }
 
-/* 分页组件 */
-.el-pagination {
-  font-size: 13px;
-}
-
-/* 弹窗组件 */
+/* 弹窗 */
 .el-dialog {
   border-radius: var(--radius-lg) !important;
+  background-color: var(--color-bg-card) !important;
 }
-
 .el-dialog__header {
   border-bottom: 1px solid var(--color-border);
   padding: 16px 20px !important;
 }
-
-.el-dialog__body {
-  padding: 20px !important;
-}
-
+.el-dialog__body { padding: 20px !important; }
 .el-dialog__footer {
   border-top: 1px solid var(--color-border);
   padding: 14px 20px !important;
 }
 
-/* 表单标签 */
+/* 表单 */
 .el-form-item__label {
   font-weight: 500;
-  color: var(--color-text-primary);
+  color: var(--color-text-primary) !important;
+}
+
+/* 输入框 */
+.el-input__wrapper,
+.el-textarea__inner {
+  background-color: var(--color-bg-card) !important;
+  box-shadow: 0 0 0 1px var(--color-border) inset !important;
+  transition: box-shadow var(--transition-base);
+}
+.el-input__inner,
+.el-textarea__inner {
+  color: var(--color-text-regular) !important;
+  font-size: 13px;
+}
+.el-input__wrapper:hover,
+.el-textarea__inner:hover {
+  box-shadow: 0 0 0 1px var(--color-primary) inset !important;
+}
+
+/* Select 下拉 */
+.el-select-dropdown {
+  background-color: var(--color-bg-card) !important;
+  border-color: var(--color-border) !important;
+}
+.el-select-dropdown__item {
+  font-size: 13px;
+  color: var(--color-text-regular) !important;
+}
+.el-select-dropdown__item.hover,
+.el-select-dropdown__item:hover {
+  background-color: var(--color-bg-hover) !important;
+}
+
+/* ── Tooltip：保留 Element Plus 原生深色气泡，不做覆盖 ──── */
+/* （全局覆盖 .el-popper 会导致 tooltip 白底白字不可见） */
+
+/* ── Popconfirm 气泡：需要跟随主题 ──────────────────────── */
+.el-popconfirm__main {
+  color: var(--color-text-regular);
+}
+
+/* ── Select / DatePicker 下拉面板：跟随主题 ─────────────── */
+.el-select__popper.el-popper,
+.el-date-picker.el-popper {
+  background-color: var(--color-bg-card) !important;
+  border-color: var(--color-border) !important;
 }
 
 /* 按钮 */
@@ -161,37 +237,20 @@ textarea,
   font-weight: 500;
 }
 
-/* Tag 组件 */
-.el-tag {
-  border-radius: var(--radius-sm) !important;
-}
+/* Tag */
+.el-tag { border-radius: var(--radius-sm) !important; }
 
 /* 消息提示 */
-.el-message {
-  border-radius: var(--radius-md) !important;
-}
+.el-message { border-radius: var(--radius-md) !important; }
 
-/* 输入框 */
-.el-input__inner,
-.el-textarea__inner {
-  font-size: 13px;
-}
+/* 分页 */
+.el-pagination { font-size: 13px; }
 
-/* Select 下拉 */
-.el-select-dropdown__item {
-  font-size: 13px;
-}
+/* 菜单项 */
+.el-menu { border-right: none !important; }
 
-/* ── 工具类 ───────────────────────────────────────────────────── */
-.flex-center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* 分割线 */
+.el-divider--horizontal {
+  border-color: var(--color-border) !important;
+  margin: 20px 0 !important;
 }
-
-.text-ellipsis {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-</style>

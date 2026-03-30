@@ -1,6 +1,6 @@
 /**
  * SQLite 数据库封装模块 — 个人助手
- * 业务表：todo（待办任务）、note（笔记）
+ * 业务表：todo（待办任务）、note（笔记）、account（账号）、app_settings（应用设置）
  * 使用 better-sqlite3（同步 API，适合 Electron 主进程）
  * 数据库路径：开发 dev-data/app.db，生产 userData/db/app.db
  */
@@ -107,6 +107,32 @@ function createTables() {
     )
   `)
 
+  // 账号密码表
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS account (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      platform    TEXT    NOT NULL,                    -- 平台名称，如"微信"
+      url         TEXT    DEFAULT '',                  -- 平台网址
+      username    TEXT    DEFAULT '',                  -- 账号/用户名/手机号/邮箱
+      password    TEXT    DEFAULT '',                  -- 密码（AES-256-GCM 加密存储）
+      category    TEXT    DEFAULT '其他',              -- 分类
+      notes       TEXT    DEFAULT '',                  -- 备注
+      is_starred  INTEGER DEFAULT 0                    -- 是否标星收藏 1是 0否
+                  CHECK(is_starred IN (0, 1)),
+      created_at  TEXT    DEFAULT (datetime('now', 'localtime')),
+      updated_at  TEXT    DEFAULT (datetime('now', 'localtime'))
+    )
+  `)
+
+  // 应用设置表（单行 KV，用于存储主密码验证哈希和盐）
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key         TEXT    PRIMARY KEY,
+      value       TEXT    NOT NULL,
+      updated_at  TEXT    DEFAULT (datetime('now', 'localtime'))
+    )
+  `)
+
   // 索引
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_todo_status   ON todo(status);
@@ -114,6 +140,9 @@ function createTables() {
     CREATE INDEX IF NOT EXISTS idx_todo_category ON todo(category);
     CREATE INDEX IF NOT EXISTS idx_note_category ON note(category);
     CREATE INDEX IF NOT EXISTS idx_note_pinned   ON note(is_pinned);
+    CREATE INDEX IF NOT EXISTS idx_account_platform ON account(platform);
+    CREATE INDEX IF NOT EXISTS idx_account_category ON account(category);
+    CREATE INDEX IF NOT EXISTS idx_account_starred  ON account(is_starred);
   `)
 
   log.info('数据表创建完成')
@@ -420,6 +449,167 @@ function getNoteCategories() {
   return [...new Set([...defaults, ...existing])]
 }
 
+// ─── 账号 CRUD ────────────────────────────────────────────────────
+
+/**
+ * 分页查询账号列表
+ * @param {{ page, pageSize, keyword, category, is_starred }} params
+ */
+function getAccountList({ page = 1, pageSize = 20, keyword = '', category = '', is_starred = '' } = {}) {
+  ensureDb()
+  const offset = (page - 1) * pageSize
+  const conditions = []
+  const params = []
+
+  if (keyword && keyword.trim()) {
+    conditions.push('(platform LIKE ? OR username LIKE ? OR notes LIKE ?)')
+    const kw = `%${keyword.trim()}%`
+    params.push(kw, kw, kw)
+  }
+  if (category && category.trim()) {
+    conditions.push('category = ?')
+    params.push(category.trim())
+  }
+  if (is_starred !== '' && is_starred !== null && is_starred !== undefined) {
+    conditions.push('is_starred = ?')
+    params.push(is_starred)
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  const { total } = db.prepare(`SELECT COUNT(*) as total FROM account ${where}`).get(...params)
+  const list = db.prepare(`
+    SELECT id, platform, url, username, category, notes, is_starred, created_at, updated_at
+    FROM account ${where}
+    ORDER BY is_starred DESC, platform ASC, id DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, pageSize, offset)
+
+  return { list, total, page, pageSize }
+}
+
+/**
+ * 获取单条账号详情（含密码，按需调用）
+ * @param {number} id
+ */
+function getAccountById(id) {
+  ensureDb()
+  if (!id) throw new Error('id 不能为空')
+  const row = db.prepare('SELECT * FROM account WHERE id = ?').get(id)
+  if (!row) throw new Error('账号不存在')
+  return row
+}
+
+/**
+ * 新增账号
+ */
+function createAccount({ platform, url = '', username = '', password = '', category = '其他', notes = '', is_starred = 0 }) {
+  ensureDb()
+  if (!platform || !platform.trim()) throw new Error('平台名称不能为空')
+  const stmt = db.prepare(`
+    INSERT INTO account (platform, url, username, password, category, notes, is_starred)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `)
+  const res = stmt.run(platform.trim(), url.trim(), username.trim(), password, category.trim(), notes.trim(), is_starred)
+  return res.lastInsertRowid
+}
+
+/**
+ * 编辑账号
+ */
+function updateAccount({ id, platform, url = '', username = '', password = '', category = '其他', notes = '', is_starred = 0 }) {
+  ensureDb()
+  if (!id) throw new Error('账号 id 不能为空')
+  if (!platform || !platform.trim()) throw new Error('平台名称不能为空')
+  db.prepare(`
+    UPDATE account
+    SET platform = ?, url = ?, username = ?, password = ?,
+        category = ?, notes = ?, is_starred = ?,
+        updated_at = datetime('now', 'localtime')
+    WHERE id = ?
+  `).run(platform.trim(), url.trim(), username.trim(), password, category.trim(), notes.trim(), is_starred, id)
+}
+
+/**
+ * 切换标星状态
+ */
+function toggleAccountStar(id) {
+  ensureDb()
+  if (!id) throw new Error('id 不能为空')
+  const row = db.prepare('SELECT is_starred FROM account WHERE id = ?').get(id)
+  if (!row) throw new Error('账号不存在')
+  const next = row.is_starred === 1 ? 0 : 1
+  db.prepare(`UPDATE account SET is_starred = ?, updated_at = datetime('now', 'localtime') WHERE id = ?`).run(next, id)
+  return next
+}
+
+/**
+ * 删除单条账号
+ */
+function deleteAccount(id) {
+  ensureDb()
+  if (!id) throw new Error('id 不能为空')
+  db.prepare('DELETE FROM account WHERE id = ?').run(id)
+}
+
+/**
+ * 批量删除账号
+ */
+function batchDeleteAccounts(ids) {
+  ensureDb()
+  if (!Array.isArray(ids) || ids.length === 0) throw new Error('请选择要删除的账号')
+  const ph = ids.map(() => '?').join(',')
+  db.prepare(`DELETE FROM account WHERE id IN (${ph})`).run(...ids)
+}
+
+/**
+ * 获取所有账号分类
+ */
+function getAccountCategories() {
+  ensureDb()
+  const rows = db.prepare(`SELECT DISTINCT category FROM account WHERE category != '' ORDER BY category ASC`).all()
+  const defaults = ['社交', '工作', '金融', '购物', '娱乐', '学习', '其他']
+  const existing = rows.map((r) => r.category)
+  return [...new Set([...defaults, ...existing])]
+}
+
+// ─── 应用设置（KV 存储）─────────────────────────────────────────
+
+/**
+ * 读取设置项
+ * @param {string} key
+ * @returns {string|null}
+ */
+function getSetting(key) {
+  ensureDb()
+  const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key)
+  return row ? row.value : null
+}
+
+/**
+ * 写入设置项（upsert）
+ * @param {string} key
+ * @param {string} value
+ */
+function setSetting(key, value) {
+  ensureDb()
+  db.prepare(`
+    INSERT INTO app_settings (key, value, updated_at)
+    VALUES (?, ?, datetime('now', 'localtime'))
+    ON CONFLICT(key) DO UPDATE SET
+      value      = excluded.value,
+      updated_at = excluded.updated_at
+  `).run(key, value)
+}
+
+/**
+ * 删除设置项
+ * @param {string} key
+ */
+function deleteSetting(key) {
+  ensureDb()
+  db.prepare('DELETE FROM app_settings WHERE key = ?').run(key)
+}
+
 // ─── 导出 ─────────────────────────────────────────────────────────
 module.exports = {
   initDatabase,
@@ -441,5 +631,18 @@ module.exports = {
   updateNote,
   deleteNote,
   batchDeleteNotes,
-  getNoteCategories
+  getNoteCategories,
+  // 账号
+  getAccountList,
+  getAccountById,
+  createAccount,
+  updateAccount,
+  toggleAccountStar,
+  deleteAccount,
+  batchDeleteAccounts,
+  getAccountCategories,
+  // 设置
+  getSetting,
+  setSetting,
+  deleteSetting
 }

@@ -10,6 +10,8 @@ import router from './router'
 // ─── Element Plus 完整引入 ──────────────────────────────────────
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
+// Element Plus 暗色主题变量（必须在 index.css 之后引入）
+import 'element-plus/theme-chalk/dark/css-vars.css'
 // Element Plus 中文语言包
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 
