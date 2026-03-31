@@ -4,8 +4,8 @@
  */
 
 const api = () => {
-  if (!window.electronAPI) throw new Error('electronAPI 未就绪，请在 Electron 环境中运行')
-  return window.electronAPI
+  if (!window.appAPI) throw new Error('appAPI 未就绪，请确保应用已初始化')
+  return window.appAPI
 }
 
 /** 分页查询待办列表 */

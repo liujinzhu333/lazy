@@ -8,13 +8,15 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 const routes = [
   {
     path: '/',
-    redirect: '/todo'
-  },
-  {
-    path: '/',
     name: 'Layout',
     component: () => import('@/layouts/MainLayout.vue'),
     children: [
+      {
+        path: '',
+        name: 'Home',
+        component: () => import('@/views/home/HomeView.vue'),
+        meta: { title: '首页', icon: 'House' }
+      },
       {
         path: 'todo',
         name: 'Todo',
@@ -43,7 +45,7 @@ const routes = [
   },
   {
     path: '/:pathMatch(.*)*',
-    redirect: '/todo'
+    redirect: '/'
   }
 ]
 

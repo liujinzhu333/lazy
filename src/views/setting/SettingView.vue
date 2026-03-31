@@ -2,6 +2,22 @@
   <div class="page-container">
     <h2 class="page-title">设置</h2>
 
+    <!-- 二维码弹窗 -->
+    <el-dialog
+      v-model="qrDialogVisible"
+      :title="qrDialogTitle"
+      width="300px"
+      align-center
+      class="qr-dialog"
+      :close-on-click-modal="true"
+    >
+      <div class="qr-dialog-body">
+        <canvas ref="qrCanvasRef" class="qr-canvas" />
+        <p class="qr-url-text">{{ qrDialogUrl }}</p>
+        <p class="qr-tip">用手机摄像头扫码即可访问</p>
+      </div>
+    </el-dialog>
+
     <div class="settings-layout">
       <!-- ══════════════════════════════════════════════════════
            外观设置
@@ -132,6 +148,51 @@
             </div>
           </div>
           <el-divider />
+          <div class="info-row align-start">
+            <span class="info-key">内网访问地址</span>
+            <div class="info-value" style="flex-direction: column; align-items: flex-end; gap: 8px;">
+              <!-- 端口编辑行 -->
+              <div class="addr-port-row">
+                <span style="font-size:12px;color:var(--color-text-secondary)">服务端口</span>
+                <el-input-number
+                  v-model="httpPort"
+                  :min="1024"
+                  :max="65535"
+                  :step="1"
+                  controls-position="right"
+                  size="small"
+                  style="width: 120px"
+                  @change="handlePortChange"
+                />
+                <el-tag v-if="portSaved" type="success" size="small" effect="plain">已保存并重启</el-tag>
+              </div>
+              <!-- 地址列表 -->
+              <template v-if="localAddresses.length">
+                <div
+                  v-for="item in localAddresses"
+                  :key="item.address"
+                  class="addr-row"
+                >
+                  <span class="addr-label">{{ item.name }}</span>
+                  <code class="addr-code">http://{{ item.address }}:{{ httpPort }}</code>
+                  <el-tooltip content="显示二维码" placement="top" :show-after="300">
+                    <el-button
+                      size="small"
+                      :icon="Grid"
+                      @click="showQrCode(`http://${item.address}:${httpPort}`, item.name)"
+                    />
+                  </el-tooltip>
+                  <el-button
+                    size="small"
+                    :icon="CopyDocument"
+                    @click="copyAddress(`http://${item.address}:${httpPort}`)"
+                  >复制</el-button>
+                </div>
+              </template>
+              <span v-else class="info-value secondary">未检测到内网地址</span>
+            </div>
+          </div>
+          <el-divider />
           <div class="info-row">
             <span class="info-key">运行环境</span>
             <span class="info-value">
@@ -174,14 +235,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import {
   Sunny, DataAnalysis, InfoFilled, Star,
-  CircleCheckFilled, CopyDocument
+  CircleCheckFilled, CopyDocument, Grid
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useTheme } from '@/composables/useTheme'
 import { fetchTodoStats } from '@/api/todo'
+import QRCode from 'qrcode'
 
 // ─── 主题 ─────────────────────────────────────────────────────────
 const { currentTheme, setTheme, THEMES } = useTheme()
@@ -192,9 +254,40 @@ function handleThemeChange(theme) {
 }
 
 // ─── 应用信息 ─────────────────────────────────────────────────────
-const appVersion = ref('1.0.0')
-const dbPath = ref('')
-const isDev = ref(false)
+const appVersion     = ref('1.0.0')
+const dbPath         = ref('')
+const isDev          = ref(false)
+/** 本机内网 IPv4 地址列表 [{ name: string, address: string }] */
+const localAddresses = ref([])
+/** 当前 HTTP 服务端口 */
+const httpPort       = ref(8899)
+/** 端口保存提示 */
+const portSaved      = ref(false)
+
+// ─── 二维码弹窗 ────────────────────────────────────────────────
+const qrDialogVisible = ref(false)
+const qrDialogUrl     = ref('')
+const qrDialogTitle   = ref('')
+const qrCanvasRef     = ref(null)
+
+async function showQrCode(url, name) {
+  qrDialogUrl.value   = url
+  qrDialogTitle.value = `扫码访问 · ${name}`
+  qrDialogVisible.value = true
+  await nextTick()
+  try {
+    await QRCode.toCanvas(qrCanvasRef.value, url, {
+      width: 220,
+      margin: 2,
+      color: {
+        dark: '#1e293b',
+        light: '#ffffff'
+      }
+    })
+  } catch (err) {
+    ElMessage.error('二维码生成失败：' + err.message)
+  }
+}
 
 // ─── 数据统计 ─────────────────────────────────────────────────────
 const stats = ref({
@@ -221,17 +314,51 @@ function copyDbPath() {
     .catch(() => ElMessage.error('复制失败'))
 }
 
+// ─── 复制内网地址 ────────────────────────────────────────────────
+function copyAddress(url) {
+  navigator.clipboard.writeText(url)
+    .then(() => ElMessage.success('地址已复制到剪贴板'))
+    .catch(() => ElMessage.error('复制失败'))
+}
+
+// ─── 修改 HTTP 服务端口 ──────────────────────────────────────────
+let portSaveTimer = null
+async function handlePortChange(val) {
+  if (!val || val < 1024 || val > 65535) return
+  clearTimeout(portSaveTimer)
+  portSaveTimer = setTimeout(async () => {
+    try {
+      const res = await window.appAPI?.setHttpPort(val)
+      if (res?.success) {
+        portSaved.value = true
+        setTimeout(() => { portSaved.value = false }, 3000)
+      } else {
+        ElMessage.error(res?.message || '端口设置失败')
+      }
+    } catch (err) {
+      ElMessage.error('端口设置失败：' + err.message)
+    }
+  }, 600)
+}
+
 // ─── 初始化 ───────────────────────────────────────────────────────
 onMounted(async () => {
   try {
-    const vRes = await window.electronAPI?.getVersion()
+    const vRes = await window.appAPI?.getVersion()
     if (vRes?.success) appVersion.value = vRes.data
 
-    const dRes = await window.electronAPI?.getDbPath()
+    const dRes = await window.appAPI?.getDbPath()
     if (dRes?.success) dbPath.value = dRes.data
 
     // 判断是否开发环境（开发库路径含 dev-data）
     isDev.value = dbPath.value.includes('dev-data')
+
+    // 获取本机内网 IP 和 HTTP 端口
+    const aRes = await window.appAPI?.getLocalAddresses()
+    if (aRes?.success) {
+      localAddresses.value = aRes.data.addresses
+      httpPort.value        = aRes.data.port
+    }
   } catch {}
 
   await loadStats()
@@ -497,6 +624,43 @@ onMounted(async () => {
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
+/* ── 内网地址行 ───────────────────────────────────────────────── */
+.addr-port-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--color-border);
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.addr-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.addr-label {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  min-width: 60px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.addr-code {
+  font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+  font-size: 12px;
+  color: var(--color-primary);
+  background: var(--color-bg-page);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  letter-spacing: 0.5px;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
 /* ── 关于区块 ─────────────────────────────────────────────── */
 .about-content {
   display: flex;
@@ -530,5 +694,42 @@ onMounted(async () => {
   color: var(--color-text-secondary);
   max-width: 460px;
   line-height: 1.7;
+}
+
+/* ── 二维码弹窗 ─────────────────────────────────────────────── */
+:global(.qr-dialog .el-dialog__body) {
+  padding: 0 24px 24px !important;
+}
+
+.qr-dialog-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.qr-canvas {
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  display: block;
+}
+
+.qr-url-text {
+  font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+  font-size: 12px;
+  color: var(--color-primary);
+  background: var(--color-bg-page);
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  word-break: break-all;
+  text-align: center;
+  max-width: 240px;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.qr-tip {
+  font-size: 12px;
+  color: var(--color-text-secondary);
 }
 </style>

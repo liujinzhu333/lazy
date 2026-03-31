@@ -21,7 +21,7 @@ const ALLOWED_CHANNELS = [
   'auth:hasMasterPassword', 'auth:isUnlocked', 'auth:setMasterPassword',
   'auth:unlock', 'auth:lock',
   // 应用
-  'app:getVersion', 'app:getDbPath'
+  'app:getVersion', 'app:getDbPath', 'app:getLocalAddresses', 'app:setHttpPort'
 ]
 
 /**
@@ -134,8 +134,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── 应用信息 ──────────────────────────────────────────────────
 
-  getVersion: () => invoke('app:getVersion'),
-  getDbPath:  () => invoke('app:getDbPath')
+  getVersion:        () => invoke('app:getVersion'),
+  getDbPath:         () => invoke('app:getDbPath'),
+  /** 获取本机所有内网 IPv4 地址列表（含 HTTP 服务端口）*/
+  getLocalAddresses: () => invoke('app:getLocalAddresses'),
+  /** 修改 HTTP 服务端口（1024~65535）并重启服务 @param {number} port */
+  setHttpPort:       (port) => invoke('app:setHttpPort', port)
 })
 
 console.log('[preload] 个人助手 API 已就绪')
