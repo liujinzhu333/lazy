@@ -4,12 +4,16 @@
  * 安全规范：nodeIntegration:false / contextIsolation:true / preload 白名单通信
  */
 
-const { app, BrowserWindow, ipcMain, shell } = require('electron')
-const path  = require('path')
-const os    = require('os')
-const http  = require('http')
-const fs    = require('fs')
-const log   = require('electron-log')
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron')
+const path           = require('path')
+const os             = require('os')
+const http           = require('http')
+const fs             = require('fs')
+const { execFile }   = require('child_process')
+const { promisify }  = require('util')
+const log            = require('electron-log')
+
+const execFileAsync = promisify(execFile)
 
 // ─── 日志配置 ─────────────────────────────────────────────────────
 log.transports.file.level = 'info'
@@ -836,6 +840,406 @@ ipcMain.handle('app:setHttpPort', (e, port) => {
   } catch (err) {
     log.error('app:setHttpPort', err)
     return { success: false, message: err.message }
+  }
+})
+
+/**
+ * 用系统默认浏览器打开外部链接
+ * 仅允许 http/https 协议，防止滥用
+ */
+ipcMain.handle('app:openExternal', (e, url) => {
+  try {
+    const parsed = new URL(url)
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new Error('仅允许打开 http/https 链接')
+    }
+    shell.openExternal(url)
+    return { success: true }
+  } catch (err) {
+    log.error('app:openExternal', err)
+    return { success: false, message: err.message }
+  }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// IPC 事件：Git 数据备份
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * 在指定 git 仓库目录执行 git 命令
+ * @param {string} cwd  git 仓库根目录
+ * @param {string[]} args git 子命令参数
+ */
+async function runGit(cwd, args) {
+  const { stdout, stderr } = await execFileAsync('git', args, {
+    cwd,
+    timeout: 30_000,
+    env: { ...process.env }
+  })
+  return { stdout: stdout.trim(), stderr: stderr.trim() }
+}
+
+/**
+ * 判断 git commit 异常是否属于"无变化可提交"（非真正错误）
+ * git 在不同版本/场景下可能输出：
+ *   "nothing to commit"
+ *   "nothing added to commit"
+ *   "nothing to commit, working tree clean"
+ */
+function isNothingToCommit(e) {
+  const text = (e.stdout || '') + (e.stderr || '') + (e.message || '')
+  return text.includes('nothing to commit') || text.includes('nothing added to commit')
+}
+
+// 固定的备份远程仓库地址
+const BACKUP_REMOTE_URL = 'https://github.com/liujinzhu333/lazy-data.git'
+
+/**
+ * 获取固定的本地备份目录（userData/git-backup）
+ */
+function getDefaultBackupPath() {
+  return path.join(app.getPath('userData'), 'git-backup')
+}
+
+/** 获取 Git 备份配置（本地路径 + 上次备份时间 + 是否已初始化） */
+ipcMain.handle('app:getBackupConfig', () => {
+  try {
+    const repoPath    = getDefaultBackupPath()
+    const lastBackup  = db.getSetting('git_backup_last') || ''
+    // 判断是否已初始化（.git 目录存在）
+    const initialized = fs.existsSync(path.join(repoPath, '.git'))
+    return { success: true, data: { repoPath, remoteUrl: BACKUP_REMOTE_URL, lastBackup, initialized } }
+  } catch (err) {
+    return { success: false, message: err.message }
+  }
+})
+
+/**
+ * 一键初始化备份仓库：
+ *   1. 创建目录（如不存在）
+ *   2. git init
+ *   3. git remote add origin（已存在则更新）
+ *   4. 写入 README.md
+ *   5. git add . && git commit && git push -u origin HEAD
+ */
+ipcMain.handle('app:initBackupRepo', async () => {
+  const repoPath  = getDefaultBackupPath()
+  const remoteUrl = BACKUP_REMOTE_URL
+  const logs = []
+  try {
+
+    // Step 1: 创建目录
+    if (!fs.existsSync(repoPath)) {
+      fs.mkdirSync(repoPath, { recursive: true })
+      logs.push('✓ 目录已创建：' + repoPath)
+    } else {
+      logs.push('ℹ 目录已存在：' + repoPath)
+    }
+
+    // Step 2: git init（幂等）
+    await runGit(repoPath, ['init'])
+    logs.push('✓ git init 完成')
+
+    // Step 3: git remote（已有则更新 URL）
+    try {
+      await runGit(repoPath, ['remote', 'add', 'origin', remoteUrl])
+      logs.push('✓ git remote add origin')
+    } catch {
+      await runGit(repoPath, ['remote', 'set-url', 'origin', remoteUrl])
+      logs.push('✓ git remote set-url origin（已更新）')
+    }
+
+    // Step 4: 写入 README 和 .gitignore（仅首次）
+    const readme = path.join(repoPath, 'README.md')
+    if (!fs.existsSync(readme)) {
+      fs.writeFileSync(readme, '# 个人助手数据备份\n\n由「个人助手」自动生成，请勿手动修改 `app.db`。\n')
+      logs.push('✓ 已创建 README.md')
+    }
+    const gitignore = path.join(repoPath, '.gitignore')
+    if (!fs.existsSync(gitignore)) {
+      fs.writeFileSync(gitignore, '# SQLite WAL 临时文件\napp.db-shm\napp.db-wal\n')
+      logs.push('✓ 已创建 .gitignore（忽略 SQLite WAL 临时文件）')
+    }
+
+    // Step 5: 首次 commit & push
+    await runGit(repoPath, ['add', '.'])
+    try {
+      await runGit(repoPath, ['commit', '-m', 'init: 初始化备份仓库'])
+      logs.push('✓ git commit — 初始化提交')
+    } catch (e) {
+      if (!isNothingToCommit(e)) throw e
+      logs.push('ℹ 无新文件，跳过 commit')
+    }
+
+    try {
+      await runGit(repoPath, ['push', '-u', 'origin', 'HEAD'])
+      logs.push('✓ git push 成功')
+    } catch (e) {
+      // push 失败不阻断初始化（网络或权限问题可后续解决）
+      logs.push(`⚠ git push 失败（可稍后重试）：${e.stderr || e.message}`)
+    }
+
+    logs.push('✓ 初始化完成')
+
+    log.info('备份仓库初始化成功:', repoPath)
+    return { success: true, data: { logs } }
+  } catch (err) {
+    const msg = err.stderr || err.message
+    logs.push(`✗ 失败：${msg}`)
+    log.error('app:initBackupRepo', err)
+    return { success: false, message: msg, data: { logs } }
+  }
+})
+
+/**
+ * 执行 Git 备份：
+ *   1. 将数据库文件复制到备份仓库
+ *   2. git add app.db
+ *   3. git commit -m "backup: <timestamp>"
+ *   4. git push
+ */
+ipcMain.handle('app:gitBackup', async () => {
+  const logs = []
+  try {
+    const repoPath = getDefaultBackupPath()
+    if (!fs.existsSync(path.join(repoPath, '.git'))) {
+      throw new Error('备份仓库尚未初始化，请先点击"初始化仓库"')
+    }
+
+    const dbSrc  = db.getDbPath()
+    const dbDest = path.join(repoPath, 'app.db')
+
+    // Step 1: WAL checkpoint — 确保最新数据已刷回主 db 文件
+    db.checkpointDb()
+    logs.push('✓ WAL checkpoint 完成')
+
+    // Step 2: 复制数据库文件
+    fs.copyFileSync(dbSrc, dbDest)
+    logs.push('✓ 数据库已复制到备份仓库')
+
+    // Step 3: git add
+    await runGit(repoPath, ['add', 'app.db'])
+    logs.push('✓ git add app.db')
+
+    // Step 4: git commit
+    const timestamp = new Date().toLocaleString('zh-CN', { hour12: false })
+    let committed = true
+    try {
+      const r = await runGit(repoPath, ['commit', '-m', `backup: ${timestamp}`])
+      logs.push(`✓ git commit — ${r.stdout.split('\n')[0]}`)
+    } catch (e) {
+      // "nothing to commit" / "nothing added to commit" 均不视为错误
+      if (isNothingToCommit(e)) {
+        logs.push('ℹ 数据无变化，跳过 commit')
+        committed = false
+      } else {
+        throw e
+      }
+    }
+
+    // Step 5: git push（只有有新 commit 才 push）
+    if (committed) {
+      const p = await runGit(repoPath, ['push'])
+      logs.push(`✓ git push — ${p.stdout || p.stderr || 'done'}`)
+    }
+
+    // 记录最后备份时间
+    db.setSetting('git_backup_last', new Date().toISOString())
+    logs.push('✓ 备份完成')
+
+    log.info('Git 备份成功:', repoPath)
+    return { success: true, data: { logs } }
+  } catch (err) {
+    const msg = err.stderr || err.stdout || err.message
+    logs.push(`✗ 失败：${msg}`)
+    log.error('app:gitBackup', err)
+    return { success: false, message: msg, data: { logs } }
+  }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// IPC 事件：获取 Git 备份并合并
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * 从远程 Git 仓库拉取最新备份，然后将备份数据库合并入本地数据库
+ * 流程：
+ *   1. 校验本地备份仓库已初始化
+ *   2. git pull（拉取最新 app.db）
+ *   3. 调用 db.mergeFromBackup() 做 updated_at 策略合并
+ */
+ipcMain.handle('app:restoreBackup', async () => {
+  const logs = []
+  try {
+    const repoPath = getDefaultBackupPath()
+
+    // Step 1: 校验仓库已初始化
+    if (!fs.existsSync(path.join(repoPath, '.git'))) {
+      throw new Error('备份仓库尚未初始化，请先点击"初始化仓库"')
+    }
+
+    const backupDbPath = path.join(repoPath, 'app.db')
+    if (!fs.existsSync(backupDbPath)) {
+      throw new Error('远程仓库中暂无备份文件（app.db），请先在其他设备执行一次备份')
+    }
+
+    // Step 2: git pull
+    logs.push('⏳ 正在从远程仓库拉取最新备份…')
+    try {
+      const r = await runGit(repoPath, ['pull', '--rebase=false'])
+      logs.push(`✓ git pull — ${r.stdout || r.stderr || 'done'}`)
+    } catch (e) {
+      // Already up to date 不算错误
+      const msg = e.stdout || e.stderr || ''
+      if (msg.includes('Already up to date') || msg.includes('Already up-to-date')) {
+        logs.push('ℹ 远程已是最新，无需拉取')
+      } else {
+        throw e
+      }
+    }
+
+    // Step 3: 再次确认 app.db 存在（pull 之后）
+    if (!fs.existsSync(backupDbPath)) {
+      throw new Error('拉取后仍未找到 app.db，请确认远程仓库中存在备份文件')
+    }
+
+    // Step 4: 合并备份数据库
+    logs.push('⏳ 正在合并备份数据…')
+    const merged = db.mergeFromBackup(backupDbPath)
+    logs.push(`✓ 待办任务：合并 ${merged.todo} 条`)
+    logs.push(`✓ 笔记：合并 ${merged.note} 篇`)
+    logs.push(`✓ 账号：合并 ${merged.account} 个`)
+    logs.push('✓ 合并完成，数据已同步到本地')
+
+    log.info('Git 备份恢复合并成功:', merged)
+    return { success: true, data: { logs, merged } }
+  } catch (err) {
+    const msg = err.stderr || err.stdout || err.message
+    logs.push(`✗ 失败：${msg}`)
+    log.error('app:restoreBackup', err)
+    return { success: false, message: msg, data: { logs } }
+  }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// IPC 事件：静态 Web 导出
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * 递归复制目录
+ */
+function copyDirSync(src, dest) {
+  fs.mkdirSync(dest, { recursive: true })
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const srcPath  = path.join(src,  entry.name)
+    const destPath = path.join(dest, entry.name)
+    if (entry.isDirectory()) copyDirSync(srcPath, destPath)
+    else fs.copyFileSync(srcPath, destPath)
+  }
+}
+
+/**
+ * 弹出文件夹选择对话框，让用户选择导出目录
+ */
+ipcMain.handle('app:showFolderPicker', async () => {
+  const result = await dialog.showOpenDialog({
+    title: '选择静态导出目录',
+    properties: ['openDirectory', 'createDirectory'],
+    buttonLabel: '选择此目录'
+  })
+  if (result.canceled) return { success: false, message: 'canceled' }
+  return { success: true, data: { path: result.filePaths[0] } }
+})
+
+/**
+ * 静态 Web 导出
+ *  1. 复制 dist/ 到输出目录
+ *  2. 导出所有数据库数据为 app-data.js
+ *  3. 将 <script src="./app-data.js"> 注入 index.html
+ *  4. 打开输出目录
+ */
+ipcMain.handle('app:exportStatic', async (e, { outputDir, buildFirst }) => {
+  const logs = []
+  try {
+    if (!outputDir) throw new Error('请先选择导出目录')
+
+    // ── Step 1: 可选重新构建 ──────────────────────────────────────
+    if (buildFirst) {
+      logs.push('⏳ 正在执行 vite build，请稍候（约 10~30 秒）…')
+      const projectRoot = path.join(__dirname, '..')
+      try {
+        const buildResult = await execFileAsync(
+          process.platform === 'win32' ? 'npm.cmd' : 'npm',
+          ['run', 'build'],
+          { cwd: projectRoot, timeout: 120_000, env: { ...process.env } }
+        )
+        logs.push('✓ vite build 完成')
+        if (buildResult.stderr) log.warn('build stderr:', buildResult.stderr)
+      } catch (buildErr) {
+        throw new Error('构建失败：' + (buildErr.stderr || buildErr.message))
+      }
+    }
+
+    // ── Step 2: 检查 dist/ ────────────────────────────────────────
+    const distDir = path.join(__dirname, '../dist')
+    if (!fs.existsSync(path.join(distDir, 'index.html'))) {
+      throw new Error('未找到 dist/index.html，请先执行"重新构建"或手动运行 npm run build')
+    }
+
+    // ── Step 3: 复制 dist → 输出目录 ─────────────────────────────
+    copyDirSync(distDir, outputDir)
+    logs.push(`✓ 已复制构建产物到 ${outputDir}`)
+
+    // ── Step 4: 导出数据库数据 ───────────────────────────────────
+    const todos    = db.getTodoList({ page: 1, pageSize: 99999 }).list
+    const noteList = db.getNoteList({ page: 1, pageSize: 99999 }).list
+    // 获取每篇笔记的完整内容
+    const notes    = noteList.map(n => { try { return db.getNoteById(n.id) } catch { return n } })
+    const accs     = db.getAccountList({ page: 1, pageSize: 99999 }).list
+    // 账号数据去除密码字段
+    const accounts = accs.map(({ password: _pw, ...rest }) => rest)
+
+    const staticData = {
+      appVersion:  app.getVersion(),
+      exportTime:  new Date().toISOString(),
+      todos,
+      notes,
+      accounts
+    }
+
+    const dataJs = [
+      '// 个人助手 · 静态数据快照',
+      `// 导出时间：${new Date().toLocaleString('zh-CN', { hour12: false })}`,
+      `// 待办 ${todos.length} 条 · 笔记 ${notes.length} 篇 · 账号 ${accounts.length} 个（不含密码）`,
+      'window.__APP_STATIC_DATA__ = ' + JSON.stringify(staticData, null, 2) + ';'
+    ].join('\n')
+
+    fs.writeFileSync(path.join(outputDir, 'app-data.js'), dataJs, 'utf-8')
+    logs.push(`✓ 已导出数据：待办 ${todos.length} 条 · 笔记 ${notes.length} 篇 · 账号 ${accounts.length} 个`)
+
+    // ── Step 5: 注入 <script> 到 index.html ──────────────────────
+    const htmlPath = path.join(outputDir, 'index.html')
+    let html = fs.readFileSync(htmlPath, 'utf-8')
+    if (!html.includes('app-data.js')) {
+      // 插到 <head> 末尾，在 Vite 模块脚本之前
+      html = html.replace('</head>', '  <script src="./app-data.js"></script>\n  </head>')
+      fs.writeFileSync(htmlPath, html, 'utf-8')
+      logs.push('✓ 已注入数据脚本到 index.html')
+    } else {
+      logs.push('ℹ index.html 已含数据脚本，已跳过注入')
+    }
+
+    // ── Step 6: 打开输出目录 ─────────────────────────────────────
+    shell.openPath(outputDir)
+    logs.push('✓ 导出完成，已打开输出目录')
+
+    log.info(`静态 Web 导出成功：${outputDir}`)
+    return { success: true, data: { logs, outputDir } }
+  } catch (err) {
+    const msg = err.stderr || err.stdout || err.message
+    logs.push(`✗ 导出失败：${msg}`)
+    log.error('app:exportStatic', err)
+    return { success: false, message: msg, data: { logs } }
   }
 })
 

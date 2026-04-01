@@ -7,6 +7,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
 import { browserApiShim } from './utils/browserApiShim'
+import { staticApiShim }  from './utils/staticApiShim'
 
 // ─── Element Plus 完整引入 ──────────────────────────────────────
 import ElementPlus from 'element-plus'
@@ -33,10 +34,15 @@ app.use(ElementPlus, {
 })
 
 // ─── 统一 API 接口 ───────────────────────────────────────────────
-// Electron 环境：使用 preload.js 注入的 electronAPI（IPC 通信）
-// 浏览器环境：使用 browserApiShim（fetch 调用 REST API）
+// Electron 环境        → electronAPI（IPC 通信）
+// 静态导出模式         → staticApiShim（读取嵌入的 JSON 快照）
+// 浏览器 HTTP 访问模式 → browserApiShim（fetch 调用 REST API）
 if (window.electronAPI) {
   window.appAPI = window.electronAPI
+  console.info('[appAPI] Electron 模式')
+} else if (window.__APP_STATIC_DATA__) {
+  window.appAPI = staticApiShim
+  console.info('[appAPI] 静态预览模式：数据来自嵌入快照，导出于', window.__APP_STATIC_DATA__.exportTime)
 } else {
   window.appAPI = browserApiShim
   console.info('[appAPI] 浏览器模式：使用 HTTP REST API shim')

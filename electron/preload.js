@@ -21,7 +21,12 @@ const ALLOWED_CHANNELS = [
   'auth:hasMasterPassword', 'auth:isUnlocked', 'auth:setMasterPassword',
   'auth:unlock', 'auth:lock',
   // 应用
-  'app:getVersion', 'app:getDbPath', 'app:getLocalAddresses', 'app:setHttpPort'
+  'app:getVersion', 'app:getDbPath', 'app:getLocalAddresses', 'app:setHttpPort',
+  'app:openExternal',
+  // Git 备份
+  'app:getBackupConfig', 'app:setBackupPath', 'app:initBackupRepo', 'app:gitBackup', 'app:restoreBackup',
+  // 静态 Web 导出
+  'app:showFolderPicker', 'app:exportStatic'
 ]
 
 /**
@@ -139,7 +144,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** 获取本机所有内网 IPv4 地址列表（含 HTTP 服务端口）*/
   getLocalAddresses: () => invoke('app:getLocalAddresses'),
   /** 修改 HTTP 服务端口（1024~65535）并重启服务 @param {number} port */
-  setHttpPort:       (port) => invoke('app:setHttpPort', port)
+  setHttpPort:       (port) => invoke('app:setHttpPort', port),
+  /** 用系统默认浏览器打开外部链接 @param {string} url */
+  openExternal:      (url)  => invoke('app:openExternal', url),
+
+  // ── Git 数据备份 ──────────────────────────────────────────────
+
+  /** 获取备份配置（repoPath + remoteUrl + lastBackup + initialized） */
+  getBackupConfig:   ()          => invoke('app:getBackupConfig'),
+  /** 一键初始化备份仓库（创建目录 + git init + remote + 首次 push）*/
+  initBackupRepo:    (opts)      => invoke('app:initBackupRepo', opts),
+  /** 执行一次 git 备份，返回 { logs: string[] } */
+  gitBackup:         ()          => invoke('app:gitBackup'),
+  /** 从远程拉取最新备份并与本地数据合并，返回 { logs: string[], merged } */
+  restoreBackup:     ()          => invoke('app:restoreBackup'),
+
+  // ── 静态 Web 导出 ─────────────────────────────────────────────
+
+  /** 弹出文件夹选择对话框，返回 { path: string } */
+  showFolderPicker:  ()          => invoke('app:showFolderPicker'),
+  /**
+   * 执行静态 Web 导出
+   * @param {{ outputDir: string, buildFirst: boolean }} opts
+   */
+  exportStatic:      (opts)      => invoke('app:exportStatic', opts)
 })
 
 console.log('[preload] 个人助手 API 已就绪')

@@ -610,11 +610,134 @@ function deleteSetting(key) {
   db.prepare('DELETE FROM app_settings WHERE key = ?').run(key)
 }
 
+// ─── 备份合并 ─────────────────────────────────────────────────────
+
+/**
+ * 将备份数据库中的数据合并到当前本地数据库
+ * 合并策略：以 updated_at 较新的记录为准
+ *   - 本地无此 id → 直接插入
+ *   - 本地有此 id 且备份更新 → 用备份覆盖
+ *   - 本地有此 id 且本地更新 → 保留本地
+ * 账号密码字段随记录整体合并（加密字段，密码未变主密码时可正常使用）
+ *
+ * @param {string} backupDbPath  备份数据库文件的完整路径
+ * @returns {{ todo: number, note: number, account: number }}  各表合并条数
+ */
+function mergeFromBackup(backupDbPath) {
+  ensureDb()
+  if (!require('fs').existsSync(backupDbPath)) {
+    throw new Error('备份数据库文件不存在：' + backupDbPath)
+  }
+
+  const backupDb = new Database(backupDbPath, { readonly: true })
+  const result = { todo: 0, note: 0, account: 0 }
+
+  try {
+    // ── 合并 todo ────────────────────────────────────────────────
+    const todos = backupDb.prepare('SELECT * FROM todo').all()
+    const todoUpsert = db.prepare(`
+      INSERT INTO todo
+        (id, title, description, priority, status, category, due_date, finished_at, created_at, updated_at)
+      VALUES
+        (@id, @title, @description, @priority, @status, @category, @due_date, @finished_at, @created_at, @updated_at)
+      ON CONFLICT(id) DO UPDATE SET
+        title       = CASE WHEN excluded.updated_at > todo.updated_at THEN excluded.title       ELSE todo.title       END,
+        description = CASE WHEN excluded.updated_at > todo.updated_at THEN excluded.description ELSE todo.description END,
+        priority    = CASE WHEN excluded.updated_at > todo.updated_at THEN excluded.priority    ELSE todo.priority    END,
+        status      = CASE WHEN excluded.updated_at > todo.updated_at THEN excluded.status      ELSE todo.status      END,
+        category    = CASE WHEN excluded.updated_at > todo.updated_at THEN excluded.category    ELSE todo.category    END,
+        due_date    = CASE WHEN excluded.updated_at > todo.updated_at THEN excluded.due_date    ELSE todo.due_date    END,
+        finished_at = CASE WHEN excluded.updated_at > todo.updated_at THEN excluded.finished_at ELSE todo.finished_at END,
+        updated_at  = CASE WHEN excluded.updated_at > todo.updated_at THEN excluded.updated_at  ELSE todo.updated_at  END
+      WHERE excluded.updated_at > todo.updated_at OR changes() = 0
+    `)
+    const mergeTodos = db.transaction((rows) => {
+      let count = 0
+      for (const row of rows) {
+        const info = todoUpsert.run(row)
+        if (info.changes > 0) count++
+      }
+      return count
+    })
+    result.todo = mergeTodos(todos)
+
+    // ── 合并 note ────────────────────────────────────────────────
+    const notes = backupDb.prepare('SELECT * FROM note').all()
+    const noteUpsert = db.prepare(`
+      INSERT INTO note
+        (id, title, content, category, is_pinned, created_at, updated_at)
+      VALUES
+        (@id, @title, @content, @category, @is_pinned, @created_at, @updated_at)
+      ON CONFLICT(id) DO UPDATE SET
+        title     = CASE WHEN excluded.updated_at > note.updated_at THEN excluded.title     ELSE note.title     END,
+        content   = CASE WHEN excluded.updated_at > note.updated_at THEN excluded.content   ELSE note.content   END,
+        category  = CASE WHEN excluded.updated_at > note.updated_at THEN excluded.category  ELSE note.category  END,
+        is_pinned = CASE WHEN excluded.updated_at > note.updated_at THEN excluded.is_pinned ELSE note.is_pinned END,
+        updated_at= CASE WHEN excluded.updated_at > note.updated_at THEN excluded.updated_at ELSE note.updated_at END
+      WHERE excluded.updated_at > note.updated_at OR changes() = 0
+    `)
+    const mergeNotes = db.transaction((rows) => {
+      let count = 0
+      for (const row of rows) {
+        const info = noteUpsert.run(row)
+        if (info.changes > 0) count++
+      }
+      return count
+    })
+    result.note = mergeNotes(notes)
+
+    // ── 合并 account ─────────────────────────────────────────────
+    const accounts = backupDb.prepare('SELECT * FROM account').all()
+    const accountUpsert = db.prepare(`
+      INSERT INTO account
+        (id, platform, url, username, password, category, notes, is_starred, created_at, updated_at)
+      VALUES
+        (@id, @platform, @url, @username, @password, @category, @notes, @is_starred, @created_at, @updated_at)
+      ON CONFLICT(id) DO UPDATE SET
+        platform   = CASE WHEN excluded.updated_at > account.updated_at THEN excluded.platform   ELSE account.platform   END,
+        url        = CASE WHEN excluded.updated_at > account.updated_at THEN excluded.url        ELSE account.url        END,
+        username   = CASE WHEN excluded.updated_at > account.updated_at THEN excluded.username   ELSE account.username   END,
+        password   = CASE WHEN excluded.updated_at > account.updated_at THEN excluded.password   ELSE account.password   END,
+        category   = CASE WHEN excluded.updated_at > account.updated_at THEN excluded.category   ELSE account.category   END,
+        notes      = CASE WHEN excluded.updated_at > account.updated_at THEN excluded.notes      ELSE account.notes      END,
+        is_starred = CASE WHEN excluded.updated_at > account.updated_at THEN excluded.is_starred ELSE account.is_starred END,
+        updated_at = CASE WHEN excluded.updated_at > account.updated_at THEN excluded.updated_at ELSE account.updated_at END
+      WHERE excluded.updated_at > account.updated_at OR changes() = 0
+    `)
+    const mergeAccounts = db.transaction((rows) => {
+      let count = 0
+      for (const row of rows) {
+        const info = accountUpsert.run(row)
+        if (info.changes > 0) count++
+      }
+      return count
+    })
+    result.account = mergeAccounts(accounts)
+  } finally {
+    backupDb.close()
+  }
+
+  return result
+}
+
+// ─── WAL Checkpoint ───────────────────────────────────────────────
+
+/**
+ * 执行 WAL checkpoint，将 WAL 文件中所有数据刷回主 db 文件并截断 WAL
+ * 在备份复制 db 文件前必须调用，否则最新写入的数据仍留在 .db-wal 中
+ */
+function checkpointDb() {
+  ensureDb()
+  db.pragma('wal_checkpoint(TRUNCATE)')
+}
+
 // ─── 导出 ─────────────────────────────────────────────────────────
 module.exports = {
   initDatabase,
   closeDatabase,
   getDbPath,
+  checkpointDb,
+  mergeFromBackup,
   // 待办
   getTodoList,
   getTodoStats,
